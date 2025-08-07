@@ -25,8 +25,9 @@ router.post(
 
       // Check if email is allowed
       const allowedEmails = [
-        "yashkharva506@gmail.com",
-        "yashkharva22@gmail.com",
+        // "yashkharva506@gmail.com",
+        // "yashkharva22@gmail.com",
+        process.env.REACT_APP_ALLOWED_EMAILS, // Use environment variable for allowed email
       ];
       if (!allowedEmails.includes(email)) {
         return res

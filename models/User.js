@@ -6,7 +6,7 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: true,
       unique: true,
-      enum: ["yashkharva506@gmail.com", "yashkharva22@gmail.com"],
+      enum: [process.env.REACT_APP_ALLOWED_EMAILS], // Use environment variable for allowed email
     },
     otp: {
       code: String,
