@@ -40,4 +40,38 @@ const sendOTP = async (email, otp) => {
   }
 };
 
-module.exports = { sendOTP };
+const sendAlertEmail = async ({ to, subject, message, data }) => {
+  const mailOptions = {
+    from: process.env.EMAIL_FROM,
+    to,
+    subject,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto;">
+        <h2 style="color:#333;">${subject}</h2>
+        <p style="color:#444;">${message}</p>
+        ${data ? `
+        <table style="border-collapse: collapse; width: 100%; margin-top:12px;">
+          <tbody>
+            ${Object.entries(data).map(([k,v]) => `
+              <tr>
+                <td style="border:1px solid #eee;padding:8px;">${k}</td>
+                <td style="border:1px solid #eee;padding:8px;">${v}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>` : ''}
+        <p style="color:#999; font-size:12px;">This notification was generated automatically.</p>
+      </div>
+    `,
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    return true;
+  } catch (error) {
+    console.error('Alert email sending error:', error);
+    return false;
+  }
+};
+
+module.exports = { sendOTP, sendAlertEmail };

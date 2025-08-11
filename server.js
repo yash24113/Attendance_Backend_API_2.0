@@ -1,14 +1,21 @@
 require("dotenv").config();
 const express = require("express");
-const multer = require("multer");
 const mongoose = require("mongoose");
 const cors = require("cors");
-const fs = require("fs");
-const path = require("path");
+const http = require('http');
+const socketIo = require('socket.io');
 
 const app = express();
+const server = http.createServer(app);
+const io = socketIo(server, {
+  cors: {
+    origin: process.env.CLIENT_URL || "http://localhost:3000",
+    methods: ["GET", "POST"]
+  }
+});
+
 const PORT = process.env.PORT || 5000;
-const HOST = process.env.HOST || "127.0.0.1";
+const HOST = process.env.HOST || "localhost";
 
 // MongoDB connection
 mongoose
@@ -19,152 +26,71 @@ mongoose
   .then(() => console.log("MongoDB connected"))
   .catch((err) => console.error("MongoDB connection error:", err));
 
-//Routes
+// Make io available to routes
+app.set('io', io);
+
+// Routes
 const authRoutes = require("./routes/auth");
-
-// Schemas
-const AttendanceSchema = new mongoose.Schema({
-  employee: String,
-  type: String,
-  date: String,
-  time: String,
-  latitude: Number,
-  longitude: Number,
-  location: String,
-  selfieUrl: String,
-  office: String,
-});
-const Attendance = mongoose.model("AttendenceData", AttendanceSchema);
-
-const EmployeeSchema = new mongoose.Schema({
-  name: String,
-});
-const Employee = mongoose.model("Employee", EmployeeSchema);
-
-const OfficeSchema = new mongoose.Schema({
-  officename: String,
-  latitude: Number,
-  longitude: Number,
-});
-const Office = mongoose.model("Office", OfficeSchema);
+const environmentRoutes = require("./routes/environment");
+const profileRoutes = require("./routes/profile");
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: process.env.CLIENT_URL || "http://localhost:3000",
+  credentials: true
+}));
 app.use(express.json());
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+app.use(express.urlencoded({ extended: true }));
 
-// Multer setup
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, "uploads/"),
-  filename: (req, file, cb) => {
-    const uniqueName = `${Date.now()}-${Math.round(Math.random() * 1e9)}.jpg`;
-    cb(null, uniqueName);
-  },
-});
-const upload = multer({ storage });
+// Serve static files
+app.use('/uploads', express.static('uploads'));
 
-// Attendance Submission
-app.post("/attendance", upload.single("selfie"), async (req, res) => {
-  try {
-    // Build selfie URL using request protocol and host
-    const selfieUrl = req.file
-      ? `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`
-      : "";
-
-    const {
-      employee,
-      type,
-      date,
-      time,
-      latitude,
-      longitude,
-      location,
-      office, // <-- added
-    } = req.body;
-
-    const attendance = new Attendance({
-      employee,
-      type,
-      date,
-      time,
-      latitude: parseFloat(latitude),
-      longitude: parseFloat(longitude),
-      location,
-      selfieUrl,
-      office,
-    });
-
-    await attendance.save();
-    res.json({ success: true, message: "Attendance recorded successfully." });
-  } catch (error) {
-    console.error("Error in /attendance:", error);
-    res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
-
-// Get Attendance Details (for Dashboard)
-app.get("/attendance", async (req, res) => {
-  try {
-    const { employee, date } = req.query;
-    // Find attendance records by employee and date
-    const query = {};
-    if (employee) query.employee = employee;
-    if (date) query.date = date;
-
-    const records = await Attendance.find(query);
-
-    // Format response to match Android expectations
-    const result = records.map((r) => ({
-      employee: r.employee,
-      type: r.type,
-      date: r.date,
-      time: r.time,
-      location: r.location,
-      office: r.office || "",
-      selfie: r.selfieUrl || "",
-    }));
-
-    res.json(result);
-  } catch (error) {
-    console.error("Error in GET /attendance:", error);
-    res.status(500).json({ error: "Failed to fetch attendance details" });
-  }
-});
-
-// Get All Employees
-app.get("/employees", async (req, res) => {
-  try {
-    const employees = await Employee.find({}, "name");
-    res.json(employees);
-  } catch (error) {
-    console.error("Error in /employees:", error);
-    res.status(500).json({ error: "Failed to fetch employees" });
-  }
-});
-
-// Get All Offices
-app.get("/offices", async (req, res) => {
-  try {
-    const offices = await Office.find({});
-    res.json(offices);
-  } catch (error) {
-    console.error("Error in /offices:", error);
-    res.status(500).json({ error: "Failed to fetch offices" });
-  }
-});
-
+// API Routes
 app.use("/api/auth", authRoutes);
+app.use("/api/environment", environmentRoutes);
+app.use("/api/profile", profileRoutes);
 
-app.get("/", (req, res) => {
-  res.json({ status: "OK", message: "API is running" });
+// Socket.IO connection handling
+io.on('connection', (socket) => {
+  console.log('Client connected:', socket.id);
+
+  socket.on('join-dashboard', () => {
+    socket.join('dashboard');
+    console.log('Client joined dashboard room');
+  });
+
+  socket.on('disconnect', () => {
+    console.log('Client disconnected:', socket.id);
+  });
 });
 
-// server.js or routes/config.js
+// Health check endpoint
+app.get("/", (req, res) => {
+  res.json({ 
+    status: "OK", 
+    message: "Smart Environment Monitor API is running",
+    version: "1.0.0"
+  });
+});
+
+// Google Maps API key endpoint
 app.get("/google", (req, res) => {
   res.json({ key: process.env.GOOGLE_MAPS_API_KEY });
 });
 
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ message: 'Something went wrong!' });
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ message: 'Route not found' });
+});
+
 // Start Server
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Server running at http://${HOST}:${PORT}`);
+  console.log(`Socket.IO server is ready`);
 });
